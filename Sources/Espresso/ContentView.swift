@@ -25,6 +25,7 @@ struct ContentView: View {
             footer
         }
         .frame(width: 340, height: 540)
+        .glassScrollers()
         .tint(accent)
         .preferredColorScheme(.dark)
     }
