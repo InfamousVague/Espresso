@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 APP="$ROOT/Espresso.app"
 SRC_ICON="$ROOT/art/AppIcon-source.png"
-VERSION="0.2.1"
+VERSION="0.2.2"
 # Same Developer ID as the rest of the suite. Override SIGN_IDENTITY=- for ad-hoc.
 SIGN_IDENTITY="${SIGN_IDENTITY:-0948896DC970503ADEF5B5070E0BB3E9D9047757}"
 DMG="$ROOT/Espresso-$VERSION.dmg"
@@ -82,3 +82,32 @@ if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTIT
   codesign --force --sign "$SIGN_IDENTITY" "$DMG" || true
 fi
 echo "✓ built $DMG"
+
+# ── Notarize + staple (Developer ID builds only) ──────────────────
+# Submits the signed .app, staples the ticket onto the .app itself
+# (so the installed /Applications copy is Gatekeeper-trusted even
+# offline) and onto the .dmg. Non-fatal: a creds-less or rejected
+# build still completes, just signed-only.
+NOTARY_PROFILE="${NOTARY_PROFILE:-Notary}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  echo "› notarizing $APP (waits on Apple)…"
+  NZIP="$(mktemp -d)/notarize.zip"
+  ditto -c -k --keepParent "$APP" "$NZIP"
+  if xcrun notarytool submit "$NZIP" \
+       --keychain-profile "$NOTARY_PROFILE" --wait; then
+    if xcrun stapler staple "$APP"; then
+      if xcrun stapler validate "$APP"; then
+        echo "✓ notarized + stapled $APP"
+      else
+        echo "⚠ staple validate failed for $APP"
+      fi
+      if [ -f "$DMG" ]; then
+        if xcrun stapler staple "$DMG"; then echo "✓ stapled $DMG"; fi
+      fi
+    else
+      echo "⚠ stapling failed for $APP"
+    fi
+  else
+    echo "⚠ notarization skipped/failed — $APP signed but not notarized"
+  fi
+fi
