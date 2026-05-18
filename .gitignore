@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+*.xcodeproj
+.DS_Store
+*.log
+Espresso.app/
+*.icns
+*.iconset/
+*.dmg
