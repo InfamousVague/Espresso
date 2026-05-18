@@ -153,24 +153,32 @@ struct ContentView: View {
                 Text(err).font(.system(size: 10)).foregroundStyle(.red)
                     .lineLimit(2).onTapGesture { store.lastError = nil }
             }
-            HStack {
-                Text(store.active ? "Awake for \(store.awakeElapsed)" : "Idle")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-                Spacer()
-                Text("Panic ⌃⇧⎋").font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            HStack {
+            HStack(spacing: 10) {
                 if store.clamshellSudoersInstalled {
-                    Button("Remove lid-closed rule") { store.removeClamshellRule() }
-                        .buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(accent)
+                    Button {
+                        store.removeClamshellRule()
+                    } label: {
+                        Image(systemName: "xmark.shield")
+                    }
+                    .controlSize(.small)
+                    .help("Remove lid-closed rule")
                 }
                 Spacer()
-                Button("Quit Espresso") { NSApplication.shared.terminate(nil) }
-                    .buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(store.active ? "Awake \(store.awakeElapsed)" : "Idle")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("Panic ⌃⇧⎋")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                }
+                .controlSize(.small)
+                .help("Quit Espresso")
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.vertical, 9)
     }
 
     private var card: some View {
