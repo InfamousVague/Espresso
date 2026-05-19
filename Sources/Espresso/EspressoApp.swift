@@ -1,52 +1,56 @@
 import SwiftUI
 import AppKit
+import EspressoPane
+import SuiteKit
 
+// Standalone Espresso. After the SuiteKit split this file is just a
+// host shim: the entire feature (store, UI, keep-awake engine, panic
+// hotkey) lives in the `EspressoPane` dynamic library so the
+// MattsSoftware launcher can load the very same code out of an
+// installed Espresso.app. Behaviour here is identical to the
+// pre-split app — its own NSStatusItem + transient NSPopover, the
+// idle⇄active cup glyph, edge clamping, click-off close.
 @main
 struct EspressoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        // Accessory app: the real UI is the NSStatusItem/NSPopover the
-        // delegate manages. This scene stays empty/never shown.
         Settings { EmptyView() }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    let store = EspressoStore()
+    private let pane = EspressoPaneProvider()
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var clickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // If the user set Espresso to "merged" and the MattsSoftware
+        // launcher is running, it hosts Espresso's pane — stand down
+        // so there's no duplicate menu-bar icon. (No-op standalone.)
+        SuiteGuard.exitIfDeferring("espresso")
+
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
+            button.image = pane.paneMenuBarImage()
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
-        updateIcon()
+        pane.onMenuBarImageChange = { [weak self] img in
+            self?.statusItem.button?.image = img
+        }
 
+        let vc = NSViewController()
+        vc.view = pane.paneMakeView()
         popover.behavior = .transient
         popover.delegate = self
-        popover.contentViewController = NSHostingController(
-            rootView: ContentView().environment(store)
-        )
+        popover.contentViewController = vc
 
-        store.onStateChange = { [weak self] in self?.updateIcon() }
-
-        PanicHotkey.shared.onTrigger = { [weak self] in self?.store.panic() }
-        PanicHotkey.shared.register()
-    }
-
-    private func updateIcon() {
-        guard let button = statusItem.button else { return }
-        let name = store.active ? "cup.and.saucer.fill" : "cup.and.saucer"
-        let img = NSImage(systemSymbolName: name, accessibilityDescription: "Espresso")
-        img?.isTemplate = true
-        button.image = img
+        pane.paneStart()
     }
 
     @objc private func togglePopover(_ sender: Any?) {
@@ -70,8 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// Keep the popover fully on the screen that holds the status
     /// item. NSPopover centers on the icon and clips when the icon
-    /// is near a screen edge (notably far right / next to the
-    /// notch); shift the window back inside the visible frame.
+    /// is near a screen edge; shift the window back inside.
     private func clampOnScreen(_ win: NSWindow, anchoredTo anchor: NSView) {
         guard let screen = anchor.window?.screen ?? NSScreen.main
         else { return }

@@ -23,6 +23,17 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/Espresso" "$APP/Contents/MacOS/Espresso"
 
+# ── Embed + (below) sign the SuiteKit contract and this
+# app's pane dylib so the MattsSoftware launcher can load
+# the SAME code out of this installed .app. rpath lets the
+# bundled exe find them under Contents/Frameworks.
+mkdir -p "$APP/Contents/Frameworks"
+cp "$BIN/libSuiteKit.dylib" "$APP/Contents/Frameworks/"
+cp "$BIN/libEspressoPane.dylib" "$APP/Contents/Frameworks/"
+if [ -d "$BIN/EspressoPane_EspressoPane.bundle" ]; then cp -R "$BIN/EspressoPane_EspressoPane.bundle" "$APP/Contents/Frameworks/"; fi
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/Espresso" 2>/dev/null || true
+
+
 ICON_KEY=""
 if [ -f "$SRC_ICON" ]; then
   ICONSET="$(mktemp -d)/AppIcon.iconset"
@@ -61,6 +72,10 @@ $ICON_KEY
 PLIST
 
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  codesign --force --options runtime --timestamp \
+    --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libSuiteKit.dylib"
+  codesign --force --options runtime --timestamp \
+    --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libEspressoPane.dylib"
   codesign --force --options runtime --timestamp \
     --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/Espresso"
   codesign --force --options runtime --timestamp \

@@ -78,6 +78,7 @@ struct ContentView: View {
                     Text("System only").tag(AwakeMode.systemOnly)
                 }
                 .pickerStyle(.segmented).labelsHidden()
+                .frame(maxWidth: .infinity)
 
                 Text("Stay awake for").font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
