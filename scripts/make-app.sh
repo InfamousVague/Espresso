@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 APP="$ROOT/Espresso.app"
 SRC_ICON="$ROOT/art/AppIcon-source.png"
-VERSION="0.3.1"
+VERSION="0.3.2"
 # Same Developer ID as the rest of the suite. Override SIGN_IDENTITY=- for ad-hoc.
 SIGN_IDENTITY="${SIGN_IDENTITY:-0948896DC970503ADEF5B5070E0BB3E9D9047757}"
 DMG="$ROOT/Espresso-$VERSION.dmg"
@@ -33,6 +33,51 @@ cp "$BIN/libEspressoPane.dylib" "$APP/Contents/Frameworks/"
 if [ -d "$BIN/EspressoPane_EspressoPane.bundle" ]; then cp -R "$BIN/EspressoPane_EspressoPane.bundle" "$APP/Contents/Frameworks/"; fi
 install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/Espresso" 2>/dev/null || true
 
+# ── Widget extension (.appex) ─────────────────────────────────────
+# Built by Xcode, not SwiftPM. SwiftPM has no `productType = app-
+# extension` (SR-14944), and without it ExtensionFoundation fatal-
+# errors with "Unrecognized extension type" at launch. The widget
+# is a tiny Xcode subproject at `Widget/EspressoWidgets.xcodeproj`
+# that consumes `EspressoShared` from this package via a local-package
+# dependency so the host pane and the widget share one source of
+# truth for the App Group, `SharedStats`, and the AppIntents.
+#
+# SKIP_WIDGET=1 lets you iterate on the host without paying the
+# xcodebuild cost on every build.
+if [ "${SKIP_WIDGET:-0}" != "1" ]; then
+  # xcodegen regenerates the .xcodeproj from project.yml — keeps
+  # the build deterministic across machines (no hand-edited pbxproj
+  # drift) and means `make-app.sh` is the only thing devs ever run.
+  if command -v xcodegen >/dev/null; then
+    ( cd "$ROOT/Widget" && xcodegen generate --quiet )
+  fi
+  echo "› xcodebuild EspressoWidgets.appex"
+  XCB_OUT="$ROOT/.build/xcode"
+  xcodebuild \
+    -project "$ROOT/Widget/EspressoWidgets.xcodeproj" \
+    -scheme EspressoWidgets \
+    -configuration Release \
+    -derivedDataPath "$XCB_OUT" \
+    MARKETING_VERSION="$VERSION" \
+    CURRENT_PROJECT_VERSION="$VERSION" \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    -quiet \
+    build
+  # Drop the freshly-built .appex into the host's PlugIns dir.
+  # Sign-pass below picks it up and re-signs inside-out with the
+  # widget entitlements and the host's Developer-ID identity.
+  WIDGET_APPEX="$XCB_OUT/Build/Products/Release/EspressoWidgets.appex"
+  if [ -d "$WIDGET_APPEX" ]; then
+    mkdir -p "$APP/Contents/PlugIns"
+    rm -rf "$APP/Contents/PlugIns/EspressoWidgets.appex"
+    ditto "$WIDGET_APPEX" "$APP/Contents/PlugIns/EspressoWidgets.appex"
+    echo "✓ embedded $APP/Contents/PlugIns/EspressoWidgets.appex"
+  else
+    echo "⚠ widget build produced no .appex at $WIDGET_APPEX"
+  fi
+fi
 
 ICON_KEY=""
 if [ -f "$SRC_ICON" ]; then
@@ -71,14 +116,39 @@ $ICON_KEY
 </plist>
 PLIST
 
+# Sign with the Developer ID if present (hardened runtime),
+# otherwise ad-hoc so it still runs locally.
+#
+# Inside-out is required (codesign rejects a parent bundle whose
+# children aren't yet signed):
+#   dylibs → widget exe (extension entitlements) → widget bundle
+#   → host exe (host entitlements) → host bundle.
+# The host's App Group entitlement is what lets it write to the
+# Group Container the extension reads — drift between
+# `Espresso.entitlements` and `EspressoWidgets.entitlements`
+# (different group ids) silently breaks the data path with no error.
+HOST_ENT="$ROOT/Espresso.entitlements"
+WIDGET_ENT="$ROOT/Widget/Supporting Files/EspressoWidgets.entitlements"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
   codesign --force --options runtime --timestamp \
     --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libSuiteKit.dylib"
   codesign --force --options runtime --timestamp \
     --sign "$SIGN_IDENTITY" "$APP/Contents/Frameworks/libEspressoPane.dylib"
+  if [ -d "$APP/Contents/PlugIns/EspressoWidgets.appex" ]; then
+    codesign --force --options runtime --timestamp \
+      --entitlements "$WIDGET_ENT" \
+      --sign "$SIGN_IDENTITY" \
+      "$APP/Contents/PlugIns/EspressoWidgets.appex/Contents/MacOS/EspressoWidgets"
+    codesign --force --options runtime --timestamp \
+      --entitlements "$WIDGET_ENT" \
+      --sign "$SIGN_IDENTITY" \
+      "$APP/Contents/PlugIns/EspressoWidgets.appex"
+  fi
   codesign --force --options runtime --timestamp \
+    --entitlements "$HOST_ENT" \
     --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/Espresso"
   codesign --force --options runtime --timestamp \
+    --entitlements "$HOST_ENT" \
     --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --strict --verbose=1 "$APP" && echo "✓ signed: $SIGN_IDENTITY"
 else
