@@ -43,47 +43,37 @@ public final class EspressoPaneProvider: NSObject, SuitePane {
         // back to its original state on every signal.
     }
 
-    /// Push the current store state to the shared-store JSON file.
-    /// ALWAYS publishes — idle is a low-priority "OFF" pill,
-    /// active is a higher-priority countdown. That way Espresso
-    /// is visible in the island as ambient presence, and
-    /// toggling keep-awake on flashes it to focus via Halo's
-    /// change-detection.
+    /// Push the current store state to the shared-store JSON.
+    /// Active → cup + countdown / "ON"; idle → clear the slot
+    /// entirely so Halo can hide its island when nothing else
+    /// is interesting. Was publishing an OFF presence pill;
+    /// that just took up screen space without telling the user
+    /// anything they didn't already know.
     private func publishLiveActivity() {
-        let symbol: String
-        let text: String
-        let priority: Int
         if store.active {
-            symbol = "cup.and.saucer.fill"
-            text = store.remaining.isEmpty ? "ON" : store.remaining
-            priority = 60  // above ambient, below transient HUDs
+            let text = store.remaining.isEmpty ? "ON" : store.remaining
+            let payload = SuiteLiveActivityStore.Payload(
+                compactLeadingSymbol: "cup.and.saucer.fill",
+                compactTrailingText: text,
+                tintHex: paneTintHex,
+                priority: 60)
+            try? SuiteLiveActivityStore.write(
+                payload, for: paneID)
+            ensurePublishTimerRunning()
         } else {
-            symbol = "cup.and.saucer"
-            text = "OFF"
-            priority = 25  // ambient — Worktree (50) wins ties
+            SuiteLiveActivityStore.clear(paneID)
+            publishTimer?.invalidate()
+            publishTimer = nil
         }
-        let payload = SuiteLiveActivityStore.Payload(
-            compactLeadingSymbol: symbol,
-            compactTrailingText: text,
-            tintHex: paneTintHex,
-            priority: priority)
-        try? SuiteLiveActivityStore.write(payload, for: paneID)
-        ensurePublishTimerRunning()
     }
 
-    /// Keep republishing on a timer so Halo's 30s TTL never
-    /// drops us. Fast cadence (1s) while active so countdown
-    /// text stays fresh; slow cadence (10s) when idle — just
-    /// a heartbeat, no UI churn.
+    /// 1Hz republish while active so countdown text stays
+    /// fresh. Torn down when idle (no heartbeat needed once
+    /// the slot is cleared).
     private func ensurePublishTimerRunning() {
-        let desired: TimeInterval = store.active ? 1.0 : 10.0
-        // No-op if we're already on the right cadence.
-        if let t = publishTimer, t.timeInterval == desired {
-            return
-        }
-        publishTimer?.invalidate()
+        guard publishTimer == nil else { return }
         publishTimer = Timer.scheduledTimer(
-            withTimeInterval: desired, repeats: true
+            withTimeInterval: 1.0, repeats: true
         ) { [weak self] _ in
             Task { @MainActor in self?.publishLiveActivity() }
         }
