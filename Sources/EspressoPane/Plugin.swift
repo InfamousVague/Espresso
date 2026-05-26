@@ -125,6 +125,22 @@ public final class EspressoPaneProvider: NSObject, SuitePane {
         subscribeToWidgetSignal(.toggle) { [weak store] in
             store?.toggle()
         }
+
+        // Halo's expanded-island "End session" button posts this.
+        // Lets the user stop keep-awake without opening any
+        // popover — same gesture iOS uses on its Live Activity
+        // tap-targets.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(
+                "com.mattssoftware.espresso.stop"),
+            object: nil,
+            queue: .main
+        ) { [weak store] _ in
+            Task { @MainActor in
+                guard let s = store, s.active else { return }
+                s.deactivate()
+            }
+        }
     }
 
     public func paneStop() {
