@@ -248,16 +248,27 @@ final class EspressoStore {
 
     private func updateRemaining() {
         guard active else { return }
+        // Zero-pad every component to two digits so the pill
+        // never re-flows mid-countdown. `01h 05m` rolls
+        // digit-for-digit into `01h 04m`; without the padding
+        // a 1h → 9h transition (or the m→s changeover) shifts
+        // the label width every tick.
         if let start = sessionStart {
             let e = Int(Date().timeIntervalSince(start))
             let h = e / 3600, m = (e % 3600) / 60, s = e % 60
-            awakeElapsed = h > 0 ? "\(h)h \(m)m" : (m > 0 ? "\(m)m \(s)s" : "\(s)s")
+            awakeElapsed = h > 0
+                ? String(format: "%02dh %02dm", h, m)
+                : (m > 0
+                    ? String(format: "%02dm %02ds", m, s)
+                    : String(format: "%02ds", s))
         }
         if let end = endDate {
             let secs = Int(end.timeIntervalSinceNow)
             if secs <= 0 { deactivate(); return }
             let h = secs / 3600, m = (secs % 3600) / 60
-            remaining = h > 0 ? "\(h)h \(m)m" : "\(m)m \(secs % 60)s"
+            remaining = h > 0
+                ? String(format: "%02dh %02dm", h, m)
+                : String(format: "%02dm %02ds", m, secs % 60)
         } else {
             remaining = ""
         }
