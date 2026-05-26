@@ -13,6 +13,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+                .frame(height: 46)
             Divider()
             ScrollView {
                 VStack(spacing: 14) {
@@ -23,6 +24,7 @@ struct ContentView: View {
             }
             Divider()
             footer
+                .frame(height: 46)
         }
         .frame(width: 340, height: 540)
         .glassScrollers()
@@ -78,6 +80,7 @@ struct ContentView: View {
                     Text("System only").tag(AwakeMode.systemOnly)
                 }
                 .pickerStyle(.segmented).labelsHidden()
+                .controlSize(.large)
                 .frame(maxWidth: .infinity)
 
                 Text("Stay awake for").font(.system(size: 10, weight: .medium))
@@ -183,9 +186,9 @@ struct ContentView: View {
     }
 
     private var card: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
             .fill(accentDark.opacity(0.34))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .stroke(accent.opacity(0.20), lineWidth: 1))
     }
 

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EspressoWidgets extension entitlements. Widget extensions on macOS
+  run sandboxed by default; we declare the sandbox explicitly + the
+  same App Group as the host so the widget's TimelineProvider can
+  read SharedStats from the shared Group Container.
+
+  NOT included: any privileged scopes. The widget never toggles
+  keep-awake directly — every state change happens in the host
+  process via IntentBus + WidgetSignal + EspressoStore, keeping the
+  IOKit / CGEvent code paths outside the extension's sandbox.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>F6ZAL7ANAD.group.com.mattssoftware.espresso</string>
+  </array>
+</dict>
+</plist>

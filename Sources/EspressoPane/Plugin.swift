@@ -15,11 +15,25 @@ public final class EspressoPaneProvider: NSObject, SuitePane {
     /// glyph should change (Espresso swaps cup⇄cup.fill on activate).
     public var onMenuBarImageChange: ((NSImage) -> Void)?
 
+    /// 1 Hz timer that re-publishes the live-activity payload to
+    /// the shared store so Halo's countdown stays fresh. Only
+    /// runs while the keep-awake session is active — paused
+    /// otherwise so we're not writing files for nothing.
+    private var publishTimer: Timer?
+
     public override init() {
         super.init()
         store.onStateChange = { [weak self] in
             guard let self else { return }
             self.onMenuBarImageChange?(self.paneMenuBarImage())
+            // Halo (the suite's Dynamic Island agent) reads
+            // ~/Library/Application Support/MattsSoftware/
+            // live-activity/espresso.json to know when to show
+            // our pill. We write here on every state change so
+            // the cross-process bridge stays live regardless of
+            // whether Halo is also running in the same process
+            // tree.
+            self.publishLiveActivity()
         }
         // Subscribing to widget signals lives in paneStart, NOT
         // init: with the launcher's `loadPanes(activate: true)`,
@@ -27,6 +41,52 @@ public final class EspressoPaneProvider: NSObject, SuitePane {
         // early enough for the Dynamic Island. Doing it in BOTH
         // places caused a double-fire that toggled the store
         // back to its original state on every signal.
+    }
+
+    /// Push the current store state to the shared-store JSON file.
+    /// ALWAYS publishes — idle is a low-priority "OFF" pill,
+    /// active is a higher-priority countdown. That way Espresso
+    /// is visible in the island as ambient presence, and
+    /// toggling keep-awake on flashes it to focus via Halo's
+    /// change-detection.
+    private func publishLiveActivity() {
+        let symbol: String
+        let text: String
+        let priority: Int
+        if store.active {
+            symbol = "cup.and.saucer.fill"
+            text = store.remaining.isEmpty ? "ON" : store.remaining
+            priority = 60  // above ambient, below transient HUDs
+        } else {
+            symbol = "cup.and.saucer"
+            text = "OFF"
+            priority = 25  // ambient — Worktree (50) wins ties
+        }
+        let payload = SuiteLiveActivityStore.Payload(
+            compactLeadingSymbol: symbol,
+            compactTrailingText: text,
+            tintHex: paneTintHex,
+            priority: priority)
+        try? SuiteLiveActivityStore.write(payload, for: paneID)
+        ensurePublishTimerRunning()
+    }
+
+    /// Keep republishing on a timer so Halo's 30s TTL never
+    /// drops us. Fast cadence (1s) while active so countdown
+    /// text stays fresh; slow cadence (10s) when idle — just
+    /// a heartbeat, no UI churn.
+    private func ensurePublishTimerRunning() {
+        let desired: TimeInterval = store.active ? 1.0 : 10.0
+        // No-op if we're already on the right cadence.
+        if let t = publishTimer, t.timeInterval == desired {
+            return
+        }
+        publishTimer?.invalidate()
+        publishTimer = Timer.scheduledTimer(
+            withTimeInterval: desired, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in self?.publishLiveActivity() }
+        }
     }
 
     // MARK: SuitePane

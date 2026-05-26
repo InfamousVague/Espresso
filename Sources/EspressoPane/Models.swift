@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import AppKit
+import WidgetKit
+import EspressoShared
 
 // MARK: - Timer presets (ported from state.rs / TimerPreset)
 
@@ -134,6 +136,7 @@ final class EspressoStore {
         if jiggleOn { startJiggle() }
         persist()
         onStateChange?()
+        publishWidgetSnapshot()
     }
 
     func deactivate() {
@@ -147,6 +150,22 @@ final class EspressoStore {
         tickTimer?.invalidate(); tickTimer = nil
         stopJiggle()
         onStateChange?()
+        publishWidgetSnapshot()
+    }
+
+    /// Single-tap toggle from the widget. Activates with the user's
+    /// last preferred mode + the indefinite preset (matching what a
+    /// user gets by clicking the menu-bar icon with no timer set),
+    /// or deactivates if already running. Idempotent on repeated
+    /// posts (no-ops if the requested transition is already done) so
+    /// the two-track intent dispatch (`IntentBus` + `WidgetSignal`)
+    /// can fire both paths without doubling up.
+    func toggle() {
+        if active {
+            deactivate()
+        } else {
+            activate(preset: .indefinite, mode: mode == .off ? .displayAndSystem : mode)
+        }
     }
 
     /// Panic — instant full stop: simulation + keep-awake + clamshell.
@@ -234,11 +253,38 @@ final class EspressoStore {
             let h = e / 3600, m = (e % 3600) / 60, s = e % 60
             awakeElapsed = h > 0 ? "\(h)h \(m)m" : (m > 0 ? "\(m)m \(s)s" : "\(s)s")
         }
-        guard let end = endDate else { remaining = ""; return }
-        let secs = Int(end.timeIntervalSinceNow)
-        if secs <= 0 { deactivate(); return }
-        let h = secs / 3600, m = (secs % 3600) / 60
-        remaining = h > 0 ? "\(h)h \(m)m" : "\(m)m \(secs % 60)s"
+        if let end = endDate {
+            let secs = Int(end.timeIntervalSinceNow)
+            if secs <= 0 { deactivate(); return }
+            let h = secs / 3600, m = (secs % 3600) / 60
+            remaining = h > 0 ? "\(h)h \(m)m" : "\(m)m \(secs % 60)s"
+        } else {
+            remaining = ""
+        }
+        // Tick-rate snapshot — keeps the widget's remaining/elapsed
+        // strings in step with the panel UI without each ContentView
+        // tick needing to know about the widget. `SharedStatsStore`
+        // is intentionally not throttled here (cf. Stats which writes
+        // at 2 Hz) because Espresso ticks at 1 Hz, well under
+        // WidgetKit's internal reload-rate ceiling.
+        publishWidgetSnapshot()
+    }
+
+    /// Compose + write the widget-facing snapshot, then poke
+    /// WidgetKit to reload timelines. Cheap (one tiny JSON write +
+    /// one IPC); safe to call from any state-change site.
+    func publishWidgetSnapshot() {
+        let snapshot = SharedStats(
+            active: active,
+            modeLabel: mode.label,
+            remaining: remaining,
+            elapsed: awakeElapsed,
+            jiggleOn: jiggleOn,
+            clamshellOn: clamshellOn,
+            sampledAt: Date()
+        )
+        StatsStore.write(snapshot)
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private func persist() {

@@ -1,0 +1,79 @@
+# xcodegen spec for the Espresso widget extension. Tiny Xcode
+# subproject that owns the WidgetKit appex — everything else (the
+# standalone Espresso shim, the EspressoPane dylib, the EspressoShared
+# library the widget reads from) stays in Package.swift at the repo
+# root. The only reason this exists is that SwiftPM has no
+# `productType = com.apple.product-type.app-extension` (SR-14944),
+# which is what ExtensionFoundation needs at launch.
+#
+# Build via the `xcodebuild` invocation in scripts/make-app.sh; that
+# bakes Espresso.app/Contents/PlugIns/EspressoWidgets.appex out of
+# this.
+
+name: EspressoWidgets
+options:
+  bundleIdPrefix: com.mattssoftware.espresso
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+
+# Consume the SPM package at ../ — that's where EspressoShared lives.
+# The widget needs `SharedStats` (the Group-Container model the host
+# writes) and `Intents` (`ToggleEspressoIntent` the widget's button
+# triggers).
+packages:
+  Espresso:
+    path: ..
+
+targets:
+  EspressoWidgets:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources
+      # Asset catalog with `WidgetBackground` + `AccentColor` named
+      # colours. Tahoe widget chrome relies on these — the gallery
+      # picker reads NSWidgetBackgroundColorName / NSAccentColorName
+      # to render the preview tile.
+      - path: Supporting Files/Assets.xcassets
+    info:
+      path: Supporting Files/Info.plist
+      properties:
+        CFBundleDisplayName: Espresso
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSWidgetBackgroundColorName: WidgetBackground
+        NSAccentColorName: AccentColor
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    # NB: NOT using `entitlements:` here. xcodegen's `entitlements.path`
+    # *overwrites* the file with an empty <dict/> on every regen unless
+    # `properties` is also set — a blank entitlements file makes pkd
+    # reject the appex with "plug-ins must be sandboxed". Point at the
+    # file via the standard Xcode build setting instead.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattssoftware.espresso.widget
+        PRODUCT_NAME: EspressoWidgets
+        CODE_SIGN_ENTITLEMENTS: Supporting Files/EspressoWidgets.entitlements
+        # Match the host app's developer-id-only flow. Manual signing
+        # so make-app.sh can re-sign inside-out before notarising.
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: F6ZAL7ANAD
+        MARKETING_VERSION: "0.3.1"
+        CURRENT_PROJECT_VERSION: "0.3.1"
+        # Hardened runtime so the same notarisation pass that wraps
+        # the host app's binary works on the widget too. The other
+        # critical extension flags (LD_ENTRY_POINT = _NSExtensionMain,
+        # application-extension API only) come for free from the
+        # `type: app-extension` declaration above — xcodegen maps it
+        # to `PRODUCT_TYPE = com.apple.product-type.app-extension`
+        # and Xcode applies the linker defaults. Setting them by
+        # hand in OTHER_LDFLAGS pipes raw `-application_extension`
+        # to clang which doesn't know that flag.
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: Espresso
+        product: EspressoShared

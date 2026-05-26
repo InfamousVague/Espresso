@@ -1,37 +1,56 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-// Espresso ships TWO products from one source tree:
+// Espresso ships THREE products from one source tree:
 //
-//  • `EspressoPane` — a dynamic library (the whole feature: store,
-//    UI, keep-awake engine) exposed through SuiteKit. It is embedded
-//    in Espresso.app/Contents/Frameworks so the MattsSoftware
-//    launcher can load it out of an installed Espresso and show it
-//    as a pane — no separate copy of the code in the launcher.
+//  • `EspressoPane` — dynamic library (store, UI, keep-awake engine)
+//    exposed through SuiteKit. Embedded in
+//    Espresso.app/Contents/Frameworks so the MattsSoftware launcher
+//    can load the same code out of an installed Espresso.
 //
-//  • `Espresso` — a thin @main shim that hosts that same pane in its
-//    own NSStatusItem/NSPopover. This is the standalone app, and its
-//    behaviour is unchanged from before the split.
+//  • `Espresso` — thin @main shim hosting that pane in its own
+//    NSStatusItem/NSPopover (standalone app).
+//
+//  • `EspressoShared` — static library with App Group id, the
+//    `SharedStats` Group-Container model, `ToggleEspressoIntent`,
+//    `IntentBus`, and `WidgetSignal` Darwin helpers. Consumed by
+//    `EspressoPane`, `Espresso`, AND the Xcode widget target at
+//    `Widget/EspressoWidgets.xcodeproj` — the widget extension can't
+//    live in SPM (SR-14944: SPM has no
+//    `productType = com.apple.product-type.app-extension`, the
+//    binary fatal-errors in ExtensionFoundation at launch). The
+//    Xcode subproject consumes `EspressoShared` via local package
+//    dependency so the widget shares one source of truth for the
+//    models + intent definitions.
 let package = Package(
     name: "Espresso",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Espresso", targets: ["Espresso"]),
-        .library(name: "EspressoPane", type: .dynamic, targets: ["EspressoPane"])
+        .library(name: "EspressoPane", type: .dynamic, targets: ["EspressoPane"]),
+        .library(name: "EspressoShared", targets: ["EspressoShared"])
     ],
     dependencies: [
         .package(path: "../suitekit-swift")
     ],
     targets: [
         .target(
+            name: "EspressoShared",
+            path: "Sources/EspressoShared"
+        ),
+        .target(
             name: "EspressoPane",
-            dependencies: [.product(name: "SuiteKit", package: "suitekit-swift")],
+            dependencies: [
+                "EspressoShared",
+                .product(name: "SuiteKit", package: "suitekit-swift")
+            ],
             path: "Sources/EspressoPane"
         ),
         .executableTarget(
             name: "Espresso",
             dependencies: [
                 "EspressoPane",
+                "EspressoShared",
                 .product(name: "SuiteKit", package: "suitekit-swift")
             ],
             path: "Sources/Espresso"

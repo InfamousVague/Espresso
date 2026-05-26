@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import EspressoPane
+import EspressoShared
 import SuiteKit
 
 // Standalone Espresso. After the SuiteKit split this file is just a
@@ -27,6 +28,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var clickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register the IntentBus handler BEFORE SuiteGuard checks for
+        // deferral. The widget's `ToggleEspressoIntent` declares
+        // `openAppWhenRun = true`, so the system launches us and
+        // dispatches `perform()` shortly after this method returns;
+        // if we hard-exit via SuiteGuard first, the intent fires
+        // into a dead process. Registering up front keeps the bus
+        // wired for the brief window the intent needs.
+        IntentBus.shared.register(
+            toggle: { [weak self] in self?.pane.paneToggle() }
+        )
+
         // If the user set Espresso to "merged" and the MattsSoftware
         // launcher is running, it hosts Espresso's pane — stand down
         // so there's no duplicate menu-bar icon. (No-op standalone.)
