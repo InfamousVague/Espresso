@@ -21,6 +21,12 @@ public final class EspressoPaneProvider: NSObject, SuitePane {
             guard let self else { return }
             self.onMenuBarImageChange?(self.paneMenuBarImage())
         }
+        // Subscribing to widget signals lives in paneStart, NOT
+        // init: with the launcher's `loadPanes(activate: true)`,
+        // paneStart fires at boot, so the subscription happens
+        // early enough for the Dynamic Island. Doing it in BOTH
+        // places caused a double-fire that toggled the store
+        // back to its original state on every signal.
     }
 
     // MARK: SuitePane
