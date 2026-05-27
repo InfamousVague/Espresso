@@ -153,6 +153,30 @@ final class EspressoStore {
         publishWidgetSnapshot()
     }
 
+    /// Push the session's end time out by `minutes` minutes —
+    /// the quick "+15 / +30 / +1h" buttons in Halo's expanded
+    /// card call this so the user can extend a keep-awake
+    /// without opening the popover.
+    ///
+    /// If the session is currently indefinite (no `endDate`),
+    /// we leave it indefinite — extending "forever" by a few
+    /// minutes is meaningless. If the session is fixed, we
+    /// bump its end date and refresh the countdown immediately
+    /// so the new value shows up in the menu-bar pill and the
+    /// island within the same tick.
+    func extend(byMinutes minutes: Int) {
+        guard active, minutes > 0 else { return }
+        if let current = endDate {
+            endDate = current.addingTimeInterval(
+                TimeInterval(minutes * 60))
+            updateRemaining()
+            onStateChange?()
+            publishWidgetSnapshot()
+        }
+        // No-op for indefinite sessions — they already run
+        // until the user explicitly stops them.
+    }
+
     /// Single-tap toggle from the widget. Activates with the user's
     /// last preferred mode + the indefinite preset (matching what a
     /// user gets by clicking the menu-bar icon with no timer set),

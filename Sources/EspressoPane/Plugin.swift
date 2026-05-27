@@ -131,6 +131,22 @@ public final class EspressoPaneProvider: NSObject, SuitePane {
                 s.deactivate()
             }
         }
+        // Halo's "+15m / +30m / +1h" extend buttons. Object is
+        // the number of minutes to add as a String. Indefinite
+        // sessions are a no-op (already running forever).
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(
+                "com.mattssoftware.espresso.extend"),
+            object: nil,
+            queue: .main
+        ) { [weak store] note in
+            guard let minutesStr = note.object as? String,
+                  let minutes = Int(minutesStr),
+                  minutes > 0 else { return }
+            Task { @MainActor in
+                store?.extend(byMinutes: minutes)
+            }
+        }
     }
 
     public func paneStop() {
