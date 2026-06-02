@@ -125,7 +125,9 @@ struct ContentView: View {
             }
             Divider().padding(.horizontal, 12)
             toggleRow("Prevent sleep when lid closed",
-                      sub: "Installs a scoped sudo rule (removable)",
+                      sub: store.clamshellSudoersInstalled
+                           ? "Used only while a session is active"
+                           : "Installs a scoped sudo rule (removable)",
                       isOn: Binding(get: { store.clamshellOn },
                                     set: { requestClamshell($0) }))
             Divider().padding(.horizontal, 12)
@@ -194,6 +196,13 @@ struct ContentView: View {
 
     private func requestClamshell(_ on: Bool) {
         guard on else { store.setClamshell(false); return }
+        // First-time only: show the disclosure + admin prompt.
+        // Once /etc/sudoers.d/espresso_power exists the toggle is
+        // a silent preference flip.
+        if Clamshell.sudoersInstalled {
+            store.setClamshell(true)
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Prevent sleep when the lid is closed?"
         alert.informativeText = Clamshell.disclosure

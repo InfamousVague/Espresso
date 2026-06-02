@@ -66,6 +66,11 @@ enum SimProfile: String, CaseIterable, Codable, Identifiable {
 struct EspressoSettings: Codable {
     var preferredMode: AwakeMode = .displayAndSystem
     var simProfile: SimProfile = .slack
+    /// User-controlled preference: when true, an active keep-awake
+    /// session also flips `pmset disablesleep` so the Mac stays
+    /// awake with the lid closed. Off by default; tied to session
+    /// lifecycle, not a system-wide always-on switch.
+    var clamshellEnabled: Bool = false
 
     private static var url: URL {
         let dir = FileManager.default
@@ -113,7 +118,10 @@ final class EspressoStore {
         let s = EspressoSettings.load()
         mode = s.preferredMode
         simProfile = s.simProfile
-        clamshellOn = Clamshell.isActive
+        // Setting, not live state — the lid-closed override is now
+        // tied to session lifecycle (engaged in activate, released
+        // in deactivate), so the toggle persists across launches.
+        clamshellOn = s.clamshellEnabled
     }
 
     // MARK: Activation
@@ -126,6 +134,13 @@ final class EspressoStore {
         sessionStart = Date()
         awakeElapsed = "0s"
         stats.startSession()
+
+        // Engage the lid-closed override for the lifetime of this
+        // session only — no-op when the user hasn't opted in or
+        // when the sudoers rule isn't installed.
+        if clamshellOn && Clamshell.sudoersInstalled {
+            if let err = Clamshell.enable() { lastError = err }
+        }
 
         if let secs = preset.durationSecs {
             endDate = Date().addingTimeInterval(TimeInterval(secs))
@@ -149,6 +164,9 @@ final class EspressoStore {
         awakeElapsed = ""
         tickTimer?.invalidate(); tickTimer = nil
         stopJiggle()
+        // Always undo any pmset disablesleep we set for this session.
+        // Idempotent if we didn't enable it.
+        if Clamshell.sudoersInstalled { _ = Clamshell.disable() }
         onStateChange?()
         publishWidgetSnapshot()
     }
@@ -192,9 +210,11 @@ final class EspressoStore {
         }
     }
 
-    /// Panic — instant full stop: simulation + keep-awake + clamshell.
+    /// Panic — instant full stop. deactivate() already releases the
+    /// keep-awake assertions, jiggle, and the lid-closed pmset
+    /// override; we preserve the user's clamshell preference so the
+    /// next session still uses it.
     func panic() {
-        if clamshellOn { _ = Clamshell.disable(); clamshellOn = false }
         deactivate()
     }
 
@@ -243,12 +263,36 @@ final class EspressoStore {
 
     // MARK: Clamshell
 
+    /// Flip the lid-closed-override preference. This no longer puts
+    /// `pmset disablesleep` into a persistent on-state — it just
+    /// records the user's intent. The override is engaged when a
+    /// keep-awake session activates and released when it ends.
+    ///
+    /// On first-time enable, the sudoers rule is installed (one
+    /// interactive admin prompt); subsequent toggles are silent.
     func setClamshell(_ on: Bool) {
-        if let err = (on ? Clamshell.enable() : Clamshell.disable()) {
-            lastError = err
-            clamshellOn = Clamshell.isActive
+        if on {
+            // First-time setup only — no-op if already installed.
+            if !Clamshell.sudoersInstalled, let err = Clamshell.installSudoers() {
+                lastError = err
+                clamshellOn = false
+                persist()
+                return
+            }
+            clamshellOn = true
+            persist()
+            // If a session is already running, engage now so the
+            // change takes effect without waiting for the next start.
+            if active, Clamshell.sudoersInstalled,
+               let err = Clamshell.enable() {
+                lastError = err
+            }
         } else {
-            clamshellOn = on
+            clamshellOn = false
+            persist()
+            // Always release pmset so toggling off mid-session
+            // restores normal lid-close sleep immediately.
+            if Clamshell.sudoersInstalled { _ = Clamshell.disable() }
         }
     }
 
@@ -323,6 +367,7 @@ final class EspressoStore {
     }
 
     private func persist() {
-        EspressoSettings(preferredMode: mode, simProfile: simProfile).save()
+        EspressoSettings(preferredMode: mode, simProfile: simProfile,
+                         clamshellEnabled: clamshellOn).save()
     }
 }
